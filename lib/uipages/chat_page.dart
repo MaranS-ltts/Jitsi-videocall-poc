@@ -14,7 +14,7 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  // --- Controllers, Services, and State Variables ---
+  // --- Controllers, Services, and State Variables ------
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final JitsiMeet _jitsiMeet = JitsiMeet();
