@@ -4,6 +4,9 @@ import 'dart:async';
 import 'package:jitsi_meet_flutter_sdk/jitsi_meet_flutter_sdk.dart';
 import 'package:video_call_poc/datamodels/chat_message.dart';
 import 'package:video_call_poc/datamodels/message_dto.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_ringtone_manager/flutter_ringtone_manager.dart';
+import 'package:video_call_poc/uipages/notification.dart';
 
 class ChatPage extends StatefulWidget {
   final String username;
@@ -19,6 +22,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
   final JitsiMeet _jitsiMeet = JitsiMeet();
   HubConnection? _hubConnection;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   late String _myUsername;
   bool _isConnectionFailed = false;
@@ -29,6 +33,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final Map<String, List<ChatMessage>> _chatHistories = {};
   String? _outgoingCallRoom;
   Timer? _outgoingCallTimer;
+  Timer? _outgoingToneTimer;
 
   @override
   void initState() {
@@ -49,6 +54,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _messageController.dispose();
     _scrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -65,10 +71,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   // --- SignalR Connection & Handlers ---
 
   void _connectAndJoin() async {
-    // String SERVER_URL =
-    //     'http://websocket.shantecharch.co.in/jitsi/signalr?username=$_myUsername';
+    String SERVER_URL =
+        'http://websocket.shantecharch.co.in/jitsi/signalr?username=$_myUsername';
 
-    String SERVER_URL = 'http://192.168.14.10:5002/jitsi/signalr?username=$_myUsername';
+    //String SERVER_URL = 'http://192.168.14.10:5002/jitsi/signalr?username=$_myUsername';
     // Check connection is alive, disconnect before re-connect
     if (_hubConnection != null &&
         _hubConnection!.state == HubConnectionState.Connected) {
@@ -143,8 +149,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _handleCallAccepted(dto.roomName);
           break;
         case 'decline':
-          _handleCallDeclined(dto.roomName);
+          _handleCallDeclined(dto.sender);
         case 'EndCall':
+          _stopRingtone();
           _handleEndCall("Missed call from ${dto.sender}");
           break;
         default:
@@ -156,7 +163,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _setStateIfMounted(() {
             _chatHistories.putIfAbsent(dto.sender, () => []).add(newMessage);
           });
-          if (dto.sender == _currentChatPartner) _scrollToBottom();
+          if (dto.sender == _currentChatPartner) {
+            _scrollToBottom();
+          }
+          else {
+            // If no, show the custom notification
+            CustomNotification.show(
+              context: context,
+              title: "New message from ${dto.sender}",
+              message: dto.message,
+              onTap: () {
+                // When the notification is tapped, switch to that user's chat
+                _selectChatPartner(dto.sender);
+              },
+            );
+          }
+
           break;
       }
     } catch (e) {
@@ -170,9 +192,39 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _showIncomingCallDialog(caller, room);
   }
 
+  void _playRingtone() async {
+    try {
+      // await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+      // await _audioPlayer.play(AssetSource('audio/ringtone.mp3'));
+      FlutterRingtoneManager().playRingtone();
+    } catch (e) {
+      print("Error playing ringtone: $e");
+    }
+  }
+
+  void _stopRingtone() {
+    // _audioPlayer.stop();
+    FlutterRingtoneManager().stop();
+  }
+
+  void _playOutgoingTone() async{
+    //FlutterRingtoneManager().playNotification();
+    _outgoingToneTimer?.cancel();
+    _outgoingToneTimer = Timer.periodic(const Duration(seconds: 4), (timer)
+    {
+      FlutterRingtoneManager().playAudioAsset("audio/standardRingtoneShort.mp3");
+    });
+  }
+
+  void _stopOutgoingTone() {
+    _outgoingToneTimer?.cancel(); // Stop the loop
+    FlutterRingtoneManager().stop(); // Stop any currently playing sound
+  }
+
   void _handleCallAccepted(String roomName) {
     if (mounted && _outgoingCallRoom == roomName) {
       _outgoingCallTimer?.cancel();
+      _stopOutgoingTone();
       Navigator.of(context).pop();
       _joinJitsiMeeting(roomName);
       _setStateIfMounted(() => _outgoingCallRoom = null);
@@ -182,8 +234,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void _handleCallDeclined(String message) {
     if (mounted && _outgoingCallRoom != null) {
       _outgoingCallTimer?.cancel();
+      _stopOutgoingTone();
       Navigator.of(context).pop();
-      _showErrorSnackBar(message);
+      _showErrorSnackBar("$message has declined the call");
       _setStateIfMounted(() => _outgoingCallRoom = null);
     }
   }
@@ -197,6 +250,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   // --- UI Interaction & Business Logic ---
 
   void _initiateCall(String callee) {
+    _playOutgoingTone();
     final roomName =
         'cl_support_call_${_myUsername}_${callee}_${DateTime.now().millisecondsSinceEpoch}';
     _setStateIfMounted(() => _outgoingCallRoom = roomName);
@@ -213,6 +267,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _outgoingCallTimer?.cancel();
     _outgoingCallTimer = Timer(const Duration(seconds: 30), () {
       if (mounted && _outgoingCallRoom == roomName) {
+        _stopOutgoingTone();
         if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
@@ -299,6 +354,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             TextButton(
               child: const Text('Cancel'),
               onPressed: () {
+                _stopRingtone();
+                _stopOutgoingTone();
                 _outgoingCallTimer?.cancel();
                 final cancelDto = MessageDto(
                     receiver: callee,
@@ -318,6 +375,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   void _showIncomingCallDialog(String caller, String room) {
+    _playRingtone();
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -329,6 +387,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             TextButton(
               child: const Text('Decline'),
               onPressed: () {
+                _stopRingtone();
                 final declineDto = MessageDto(
                   receiver: caller, // CORRECTED ORDER
                   sender: _myUsername,
@@ -343,6 +402,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             TextButton(
               child: const Text('Accept'),
               onPressed: () {
+                _stopRingtone();
                 final acceptDto = MessageDto(
                   receiver: caller, // CORRECTED ORDER
                   sender: _myUsername,

@@ -38,6 +38,7 @@ dependencies:
   socket_io_client: ^2.0.3+1
   signalr_netcore: ^1.4.4
   audioplayers: ^6.5.1
+  flutter_ringtone_manager: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -65,8 +66,8 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
+  assets:
+    - assets/audio/
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
